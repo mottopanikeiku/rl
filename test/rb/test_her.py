@@ -311,6 +311,44 @@ class TestHERReplayBuffer:
         rb.sample()
         assert rb._last_cache_key != key1
 
+    def test_sample_after_overwriting_full_storage(self):
+        """Relabeling must keep working once multi-transition writes overwrite a full storage."""
+        from torchrl.data import HERReplayBuffer, LazyTensorStorage
+
+        rb = HERReplayBuffer(
+            reward_fn=lambda td: torch.zeros(*td.batch_size, 1),
+            storage=LazyTensorStorage(20),
+            batch_size=20,
+            her_ratio=1.0,
+            strategy="final",
+        )
+        episode_id = 0
+        # Every write fills half of the storage, so no episode straddles two writes.
+        for episode_lengths in ([5, 5], [5, 5], [10], [4, 6], [10]):
+            n = sum(episode_lengths)
+            done = torch.zeros(n, 1, dtype=torch.bool)
+            episode = torch.zeros(n, 1)
+            start = 0
+            for length in episode_lengths:
+                done[start + length - 1] = True
+                episode[start : start + length] = episode_id
+                episode_id += 1
+                start += length
+            rb.extend(
+                TensorDict(
+                    {
+                        "desired_goal": torch.zeros(n, 1),
+                        "achieved_goal": episode,
+                        "episode": episode,
+                        "next": {"reward": torch.zeros(n, 1), "done": done},
+                    },
+                    batch_size=[n],
+                )
+            )
+            batch = rb.sample()
+            # The final achieved goal of an episode is its id
+            torch.testing.assert_close(batch["desired_goal"], batch["episode"])
+
     # ------------------------------------------------------------------
     # HindsightStrategy enum
     # ------------------------------------------------------------------

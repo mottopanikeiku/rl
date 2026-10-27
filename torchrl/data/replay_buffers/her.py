@@ -164,7 +164,7 @@ class HERReplayBuffer(TensorDictReplayBuffer):
         self.reward_key = reward_key
         self._keys_validated: bool = False
         self._episode_ends_cache: torch.Tensor | None = None
-        self._last_cache_key: tuple = (-1, None, False)
+        self._last_cache_key: tuple = (-1, -1)
 
     # -- key helpers ---------------------------------------------------------
 
@@ -182,11 +182,10 @@ class HERReplayBuffer(TensorDictReplayBuffer):
     # -- episode cache -------------------------------------------------------
 
     def _storage_cache_key(self, storage: Storage) -> tuple:
-        return (
-            len(storage),
-            getattr(storage, "_last_cursor", None),
-            bool(getattr(storage, "_is_full", False)),
-        )
+        # ``_last_cursor`` is a tensor when a write spans several slots, which
+        # tuples cannot compare, and it can repeat while the data changes.
+        # The revision is bumped on every write instead.
+        return (storage._mutation_revision, len(storage))
 
     def _get_episode_ends(self, storage: Storage) -> torch.Tensor:
         key = self._storage_cache_key(storage)
@@ -405,7 +404,7 @@ class HERReplayBuffer(TensorDictReplayBuffer):
     def empty(self, empty_write_count: bool = True) -> None:
         super().empty(empty_write_count=empty_write_count)
         self._episode_ends_cache = None
-        self._last_cache_key = (-1, None, False)
+        self._last_cache_key = (-1, -1)
 
     def state_dict(self) -> dict:
         sd = super().state_dict()
@@ -425,7 +424,7 @@ class HERReplayBuffer(TensorDictReplayBuffer):
         super().load_state_dict(state_dict)
         if her_state is not None:
             self._episode_ends_cache = her_state.get("episode_ends_cache")
-            self._last_cache_key = her_state.get("last_cache_key", (-1, None, False))
+            self._last_cache_key = her_state.get("last_cache_key", (-1, -1))
 
     # -- repr ---------------------------------------------------------------
 
